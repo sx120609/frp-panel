@@ -202,6 +202,10 @@ async function serveStatic(req, res, pathname) {
 
 await loadDb();
 await writeFile(path.join(GENERATED_DIR, 'frps.toml'), renderFrpsConfig());
+if (process.env.FRPS_AUTO_START === 'true') {
+  try { await startFrps(); console.log('frps auto-started'); }
+  catch (error) { console.error('frps auto-start failed:', error.message); }
+}
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`); const pathname = url.pathname;

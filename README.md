@@ -49,6 +49,7 @@
     npm start
 
 若手动运行且服务器上已有 frps，把 FRPS_BIN 设置为其绝对路径；面板中的启动/停止按钮会直接管理该进程。Docker 方式则使用镜像内置的 frps。
+设置 FRPS_AUTO_START=true 后，面板进程启动时会自动拉起 frps，适合 systemd 部署。
 
 ## 客户端使用
 
