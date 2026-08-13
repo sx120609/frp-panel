@@ -122,12 +122,13 @@ function renderFrpsConfig() {
 function renderFrpcConfig(client) {
   const s = db.settings;
   const tunnels = db.tunnels.filter(t => t.clientId === client.id && t.enabled);
-  const lines = [`serverAddr = "${s.serverAddr.replace(/^https?:\/\//, '').replace(/:\d+$/, '')}"`, `serverPort = ${s.serverPort}`, '', '[auth]', 'method = "token"', `token = "${s.authToken}"`, '', '[log]', 'to = "console"', 'level = "info"', ''];
+  const quote = value => JSON.stringify(String(value ?? ''));
+  const lines = [`serverAddr = ${quote(s.serverAddr.replace(/^https?:\/\//, '').replace(/:\d+$/, ''))}`, `serverPort = ${s.serverPort}`, '', 'auth.method = "token"', `auth.token = ${quote(s.authToken)}`, '', 'log.to = "console"', 'log.level = "info"', ''];
   for (const t of tunnels) {
-    lines.push(`[${t.type}.${t.id}]`, `type = "${t.type}"`, `localIP = "${t.localIP}"`, `localPort = ${t.localPort}`);
+    lines.push('[[proxies]]', `name = ${quote(t.name || t.id)}`, `type = ${quote(t.type)}`, `localIP = ${quote(t.localIP)}`, `localPort = ${t.localPort}`);
     if (t.remotePort) lines.push(`remotePort = ${t.remotePort}`);
-    if (t.customDomains?.length) lines.push(`customDomains = [${t.customDomains.map(x => `"${x}"`).join(', ')}]`);
-    if (t.subdomain) lines.push(`subdomain = "${t.subdomain}"`);
+    if (t.customDomains?.length) lines.push(`customDomains = [${t.customDomains.map(quote).join(', ')}]`);
+    if (t.subdomain) lines.push(`subdomain = ${quote(t.subdomain)}`);
     lines.push('');
   }
   return lines.join('\n');
@@ -142,7 +143,48 @@ function windowsInstallScript(client) {
   const configUrl = `${base.replace(/\/$/, '')}/client/${client.id}/frpc.toml?token=${encodeURIComponent(client.token)}`;
   const releaseBase = `${FRP_DOWNLOAD_BASE_URL}/v${FRP_VERSION}`;
   const name = client.name.replace(/'/g, "''");
-  return `#requires -Version 5.1\n$ErrorActionPreference = 'Stop'\n# frp-panel Windows client bootstrap for ${name}\n$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())\nif (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw '请用管理员身份打开 PowerShell 后再执行此命令。' }\n$installDir = Join-Path $env:ProgramData 'frp-panel\\${client.id}'\nNew-Item -ItemType Directory -Force -Path $installDir | Out-Null\n$configPath = Join-Path $installDir 'frpc.toml'\n$frpcPath = Join-Path $installDir 'frpc.exe'\nInvoke-WebRequest -UseBasicParsing -Uri '${configUrl}' -OutFile $configPath\nif (-not (Test-Path $frpcPath)) {\n  $machineArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }\n  $arch = switch ($machineArch.ToUpperInvariant()) { 'AMD64' { 'amd64'; break } 'ARM64' { 'arm64'; break } 'X86' { '386'; break } default { throw \"不支持的 Windows 架构: $machineArch\" } }\n  $version = '${FRP_VERSION}'\n  $zipPath = Join-Path $env:TEMP "frp_\${version}_windows_\${arch}.zip"\n  $downloadUrl = "${releaseBase}/frp_\${version}_windows_\${arch}.zip"\n  Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $zipPath\n  $extractDir = Join-Path $env:TEMP \"frp-panel-$([Guid]::NewGuid().ToString('N'))\"\n  Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force\n  $candidate = Get-ChildItem -Path $extractDir -Filter frpc.exe -Recurse | Select-Object -First 1\n  if (-not $candidate) { throw '下载的 FRP 压缩包中未找到 frpc.exe。' }\n  Copy-Item $candidate.FullName $frpcPath -Force\n  Remove-Item $extractDir, $zipPath -Recurse -Force -ErrorAction SilentlyContinue\n}\n$serviceName = 'frpc-${client.id}'\n$existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue\nif ($existing) { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue; sc.exe delete $serviceName | Out-Null; Start-Sleep -Seconds 1 }\n$binPath = '"' + $frpcPath + '" -c "' + $configPath + '"'\nNew-Service -Name $serviceName -BinaryPathName $binPath -DisplayName 'frpc (${name})' -Description 'frp-panel managed client' -StartupType Automatic | Out-Null\nStart-Service -Name $serviceName\nWrite-Host \"frpc Windows 客户端已安装并启动: $serviceName\" -ForegroundColor Green\nGet-Service -Name $serviceName\n`;
+  return [
+    '#requires -Version 5.1',
+    "$ErrorActionPreference = 'Stop'",
+    `# frp-panel Windows client bootstrap for ${name}`,
+    '$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())',
+    "if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw '请用管理员身份打开 PowerShell 后再执行此命令。' }",
+    `$installDir = Join-Path $env:ProgramData 'frp-panel\\${client.id}'`,
+    'New-Item -ItemType Directory -Force -Path $installDir | Out-Null',
+    "$configPath = Join-Path $installDir 'frpc.toml'",
+    "$frpcPath = Join-Path $installDir 'frpc.exe'",
+    `Invoke-WebRequest -UseBasicParsing -Uri '${configUrl}' -OutFile $configPath`,
+    'if (-not (Test-Path $frpcPath)) {',
+    '  $machineArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }',
+    "  $arch = switch ($machineArch.ToUpperInvariant()) { 'AMD64' { 'amd64'; break } 'ARM64' { 'arm64'; break } 'X86' { '386'; break } default { throw \"不支持的 Windows 架构: $machineArch\" } }",
+    `  $version = '${FRP_VERSION}'`,
+    '  $zipPath = Join-Path $env:TEMP "frp_${version}_windows_${arch}.zip"',
+    `  $downloadUrl = "${releaseBase}/frp_\${version}_windows_\${arch}.zip"`,
+    '  Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $zipPath',
+    '  $extractDir = Join-Path $env:TEMP "frp-panel-$([Guid]::NewGuid().ToString(\'N\'))"',
+    '  Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force',
+    '  $candidate = Get-ChildItem -Path $extractDir -Filter frpc.exe -Recurse | Select-Object -First 1',
+    "  if (-not $candidate) { throw '下载的 FRP 压缩包中未找到 frpc.exe。' }",
+    '  Copy-Item $candidate.FullName $frpcPath -Force',
+    '  Remove-Item $extractDir, $zipPath -Recurse -Force -ErrorAction SilentlyContinue',
+    '}',
+    '& $frpcPath verify -c $configPath',
+    'if ($LASTEXITCODE -ne 0) { throw "frpc 配置校验失败，请检查 $configPath" }',
+    `$taskName = 'frpc-${client.id}'`,
+    '$oldTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue',
+    'if ($oldTask) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }',
+    '$oldService = Get-Service -Name $taskName -ErrorAction SilentlyContinue',
+    'if ($oldService) { Stop-Service -Name $taskName -Force -ErrorAction SilentlyContinue; sc.exe delete $taskName | Out-Null; Start-Sleep -Seconds 1 }',
+    '$action = New-ScheduledTaskAction -Execute $frpcPath -Argument "-c `"$configPath`""',
+    '$trigger = New-ScheduledTaskTrigger -AtStartup',
+    '$principal = New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest',
+    `Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Description "frpc (${name}) managed by frp-panel" -Force | Out-Null`,
+    'Start-ScheduledTask -TaskName $taskName',
+    'Start-Sleep -Seconds 2',
+    'if (-not (Get-Process -Name frpc -ErrorAction SilentlyContinue)) { throw "frpc 未能启动，请查看任务计划程序中的 $taskName 或手动运行: $frpcPath -c $configPath" }',
+    'Write-Host "frpc Windows 客户端已安装并启动（开机任务）: $taskName" -ForegroundColor Green',
+    'Get-ScheduledTask -TaskName $taskName | Select-Object TaskName, State'
+  ].join('\n');
 }
 async function startFrps() {
   if (frpsProcess && !frpsProcess.killed) return { running: true, pid: frpsProcess.pid };

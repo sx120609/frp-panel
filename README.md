@@ -56,7 +56,7 @@
 1. 在“客户端”页新建客户端。
 2. 在“隧道”页添加一个或多个映射。
 3. 点击“一键命令”，选择 Linux 或 Windows PowerShell。
-4. Linux 命令会创建 systemd 服务；Windows 命令需要在“管理员 PowerShell”中执行，会自动下载对应架构的 frpc、写入 `%ProgramData%\\frp-panel` 并创建自动启动的 Windows 服务。
+4. Linux 命令会创建 systemd 服务；Windows 命令需要在“管理员 PowerShell”中执行，会自动校验配置、下载对应架构的 frpc、写入 `%ProgramData%\\frp-panel` 并创建 Windows 开机任务。Windows 原生 `frpc.exe` 不是 Service Control Manager 服务程序，因此使用任务计划程序托管，避免直接 `New-Service` 导致启动失败。
 5. macOS 或不希望使用系统服务的机器，可在“配置”中复制 TOML，下载对应版本的 frpc 后运行 `frpc -c frpc.toml`。
 
 客户端安装脚本使用带令牌的 URL。令牌等同于访问权限，请不要公开分享；删除客户端前先删除该客户端下的隧道。
