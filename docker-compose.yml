@@ -1,0 +1,19 @@
+services:
+  frp-panel:
+    build: .
+    container_name: frp-panel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "7000:7000"
+      - "7500:7500"
+    environment:
+      PORT: 8080
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      DATA_DIR: /app/data
+      FRPS_BIN: /usr/local/bin/frps
+    volumes:
+      - ./data:/app/data
+      - ./generated:/app/generated

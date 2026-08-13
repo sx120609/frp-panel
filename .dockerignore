@@ -1,0 +1,7 @@
+.git
+.env
+data
+generated
+node_modules
+outputs
+*.zip

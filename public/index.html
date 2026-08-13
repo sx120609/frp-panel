@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>frp-panel · 公网穿透控制台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+  <section id="loginView" class="login-shell">
+    <div class="login-card">
+      <div class="brand-mark">FRP</div>
+      <p class="eyebrow">SELF-HOSTED CONTROL PLANE</p>
+      <h1>公网穿透控制台</h1>
+      <p class="muted">管理 frps、客户端和隧道，生成可复制的一键安装命令。</p>
+      <form id="loginForm">
+        <label>管理员密码<input id="password" type="password" autocomplete="current-password" required placeholder="ADMIN_PASSWORD" /></label>
+        <button class="primary" type="submit">进入控制台</button>
+      </form>
+      <p id="loginError" class="error"></p>
+    </div>
+  </section>
+  <div id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="logo"><span>FRP</span><small>CONTROL PLANE</small></div>
+      <nav>
+        <button class="nav-item active" data-tab="overview"><span>◈</span>概览</button>
+        <button class="nav-item" data-tab="clients"><span>⌁</span>客户端</button>
+        <button class="nav-item" data-tab="tunnels"><span>⇄</span>隧道</button>
+        <button class="nav-item" data-tab="settings"><span>⚙</span>服务设置</button>
+      </nav>
+      <div class="side-foot"><span class="dot" id="sideDot"></span><span id="sideStatus">检查服务状态…</span><button id="logoutBtn">退出</button></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><p class="eyebrow" id="crumb">FRP / OVERVIEW</p><h2 id="pageTitle">运行概览</h2></div><div class="top-actions"><span class="server-chip" id="serverChip">frps · …</span><button class="icon-btn" id="refreshBtn" title="刷新">↻</button></div></header>
+      <div id="tab-overview" class="tab-page"></div>
+      <div id="tab-clients" class="tab-page hidden"></div>
+      <div id="tab-tunnels" class="tab-page hidden"></div>
+      <div id="tab-settings" class="tab-page hidden"></div>
+    </main>
+  </div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

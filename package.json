@@ -1,0 +1,15 @@
+{
+  "name": "frp-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "轻量的 frps 在线管理面板与客户端配置中心",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "check": "node --check server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
