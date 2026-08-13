@@ -2,6 +2,7 @@ const $=(s,r=document)=>r.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const S={data:null,tab:'overview'};
 async function api(url,opt={}){const r=await fetch(url,{headers:{'content-type':'application/json',...(opt.headers||{})},...opt});const b=await r.json().catch(()=>({}));if(!r.ok)throw Error(b.error||'Request failed');return b}
+async function load(){S.data=await api('/api/bootstrap');render()}
 function toast(msg,bad=false){const e=$('#toast');e.textContent=msg;e.style.background=bad?'#a93245':'#122033';e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2400)}
 function tab(name){S.tab=name;document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));document.querySelectorAll('.tab-page').forEach(x=>x.classList.toggle('hidden',x.id!=='tab-'+name));const n={overview:'运行概览',clients:'客户端管理',tunnels:'隧道管理',settings:'服务设置'};$('#pageTitle').textContent=n[name];$('#crumb').textContent='FRP / '+name.toUpperCase()}
 function render(){const d=S.data;$('#serverChip').textContent='frps · '+(d.frps.running?'运行中':'未启动');$('#sideDot').classList.toggle('good',d.frps.running);$('#sideStatus').textContent=d.frps.running?'frps 运行中':'frps 未启动';overview();clients();tunnels();settings();tab(S.tab)}
