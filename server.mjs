@@ -15,6 +15,8 @@ const PORT = Number(process.env.PORT || 8080);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const FRPS_BIN = process.env.FRPS_BIN || 'frps';
+const FRP_VERSION = process.env.FRP_VERSION || '0.61.1';
+const FRP_DOWNLOAD_BASE_URL = (process.env.FRP_DOWNLOAD_BASE_URL || 'https://github.com/fatedier/frp/releases/download').replace(/\/$/, '');
 const sessions = new Map();
 let frpsProcess = null;
 
@@ -135,6 +137,13 @@ function installScript(client) {
   const configUrl = `${base.replace(/\/$/, '')}/client/${client.id}/frpc.toml?token=${encodeURIComponent(client.token)}`;
   return `#!/usr/bin/env bash\nset -euo pipefail\n# frp-panel client bootstrap for ${client.name}\nINSTALL_DIR="/etc/frp"\nmkdir -p "$INSTALL_DIR"\ncurl -fsSL '${configUrl}' -o "$INSTALL_DIR/frpc.toml"\nif ! command -v frpc >/dev/null 2>&1; then\n  echo "未检测到 frpc，请先从 https://github.com/fatedier/frp/releases 下载并放入 PATH。" >&2\n  exit 2\nfi\ncat >/etc/systemd/system/frpc-${client.id}.service <<'UNIT'\n[Unit]\nDescription=frpc (${client.name})\nAfter=network-online.target\n[Service]\nExecStart=/usr/bin/frpc -c /etc/frp/frpc.toml\nRestart=always\nRestartSec=3\n[Install]\nWantedBy=multi-user.target\nUNIT\nsystemctl daemon-reload\nsystemctl enable --now frpc-${client.id}.service\necho 'frpc 已安装并启动：systemctl status frpc-${client.id}.service'\n`;
 }
+function windowsInstallScript(client) {
+  const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`;
+  const configUrl = `${base.replace(/\/$/, '')}/client/${client.id}/frpc.toml?token=${encodeURIComponent(client.token)}`;
+  const releaseBase = `${FRP_DOWNLOAD_BASE_URL}/v${FRP_VERSION}`;
+  const name = client.name.replace(/'/g, "''");
+  return `#requires -Version 5.1\n$ErrorActionPreference = 'Stop'\n# frp-panel Windows client bootstrap for ${name}\n$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())\nif (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw '请用管理员身份打开 PowerShell 后再执行此命令。' }\n$installDir = Join-Path $env:ProgramData 'frp-panel\\${client.id}'\nNew-Item -ItemType Directory -Force -Path $installDir | Out-Null\n$configPath = Join-Path $installDir 'frpc.toml'\n$frpcPath = Join-Path $installDir 'frpc.exe'\nInvoke-WebRequest -UseBasicParsing -Uri '${configUrl}' -OutFile $configPath\nif (-not (Test-Path $frpcPath)) {\n  $machineArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }\n  $arch = switch ($machineArch.ToUpperInvariant()) { 'AMD64' { 'amd64'; break } 'ARM64' { 'arm64'; break } 'X86' { '386'; break } default { throw \"不支持的 Windows 架构: $machineArch\" } }\n  $version = '${FRP_VERSION}'\n  $zipPath = Join-Path $env:TEMP "frp_\${version}_windows_\${arch}.zip"\n  $downloadUrl = '${releaseBase}/frp_\${version}_windows_\${arch}.zip'\n  Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $zipPath\n  $extractDir = Join-Path $env:TEMP \"frp-panel-$([Guid]::NewGuid().ToString('N'))\"\n  Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force\n  $candidate = Get-ChildItem -Path $extractDir -Filter frpc.exe -Recurse | Select-Object -First 1\n  if (-not $candidate) { throw '下载的 FRP 压缩包中未找到 frpc.exe。' }\n  Copy-Item $candidate.FullName $frpcPath -Force\n  Remove-Item $extractDir, $zipPath -Recurse -Force -ErrorAction SilentlyContinue\n}\n$serviceName = 'frpc-${client.id}'\n$existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue\nif ($existing) { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue; sc.exe delete $serviceName | Out-Null; Start-Sleep -Seconds 1 }\n$binPath = '"' + $frpcPath + '" -c "' + $configPath + '"'\nNew-Service -Name $serviceName -BinaryPathName $binPath -DisplayName 'frpc (${name})' -Description 'frp-panel managed client' -StartupType Automatic | Out-Null\nStart-Service -Name $serviceName\nWrite-Host \"frpc Windows 客户端已安装并启动: $serviceName\" -ForegroundColor Green\nGet-Service -Name $serviceName\n`;
+}
 async function startFrps() {
   if (frpsProcess && !frpsProcess.killed) return { running: true, pid: frpsProcess.pid };
   const cfg = path.join(GENERATED_DIR, 'frps.toml'); await writeFile(cfg, renderFrpsConfig());
@@ -171,7 +180,7 @@ async function api(req, res, pathname, method) {
     const configMatch = pathname.match(/^\/api\/clients\/([^/]+)\/config$/);
     if (configMatch && method === 'GET') { const c = getClient(configMatch[1]); if (!c) return json(res, 404, { error: '客户端不存在' }); return text(res, 200, renderFrpcConfig(c), 'text/plain; charset=utf-8', { 'content-disposition': `attachment; filename="frpc-${c.id}.toml"` }); }
     const commandMatch = pathname.match(/^\/api\/clients\/([^/]+)\/install-command$/);
-    if (commandMatch && method === 'GET') { const c = getClient(commandMatch[1]); if (!c) return json(res, 404, { error: '客户端不存在' }); const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`; return json(res, 200, { command: `curl -fsSL '${base.replace(/\/$/, '')}/install/${c.id}.sh?token=${encodeURIComponent(c.token)}' | sudo bash`, config: renderFrpcConfig(c) }); }
+    if (commandMatch && method === 'GET') { const c = getClient(commandMatch[1]); if (!c) return json(res, 404, { error: '客户端不存在' }); const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`; const scriptUrl = `${base.replace(/\/$/, '')}/install/${c.id}.sh?token=${encodeURIComponent(c.token)}`; const windowsScriptUrl = `${base.replace(/\/$/, '')}/install/${c.id}.ps1?token=${encodeURIComponent(c.token)}`; return json(res, 200, { command: `curl -fsSL '${scriptUrl}' | sudo bash`, windowsCommand: `irm '${windowsScriptUrl}' | iex`, config: renderFrpcConfig(c) }); }
     if (pathname === '/api/tunnels' && method === 'POST') { const b = await readBody(req); if (!getClient(clean(b.clientId))) return json(res, 400, { error: '客户端不存在' }); const tunnel = { id: id('tun'), clientId: clean(b.clientId), ...validateTunnel(b), createdAt: now() }; db.tunnels.push(tunnel); logAudit('创建隧道', { id: tunnel.id }); await saveDb(); return json(res, 201, tunnel); }
     const tunnelMatch = pathname.match(/^\/api\/tunnels\/([^/]+)$/); const tunnelId = tunnelMatch?.[1];
     if (tunnelId && method === 'PATCH') { const t = db.tunnels.find(x => x.id === tunnelId); if (!t) return json(res, 404, { error: '隧道不存在' }); Object.assign(t, validateTunnel({ ...t, ...(await readBody(req)) })); logAudit('更新隧道', { id: tunnelId }); await saveDb(); return json(res, 200, t); }
@@ -189,6 +198,11 @@ async function serveStatic(req, res, pathname) {
     const clientId = path.basename(pathname, '.sh'); const c = getClient(clientId); const token = new URL(req.url, `http://${req.headers.host}`).searchParams.get('token');
     if (!c || !token || token !== c.token) return text(res, 404, 'not found');
     return text(res, 200, installScript(c), 'text/x-shellscript; charset=utf-8', { 'content-disposition': `attachment; filename="frpc-${clientId}.sh"` });
+  }
+  if (pathname.startsWith('/install/') && pathname.endsWith('.ps1')) {
+    const clientId = path.basename(pathname, '.ps1'); const c = getClient(clientId); const token = new URL(req.url, `http://${req.headers.host}`).searchParams.get('token');
+    if (!c || !token || token !== c.token) return text(res, 404, 'not found');
+    return text(res, 200, windowsInstallScript(c), 'text/plain; charset=utf-8', { 'content-disposition': `attachment; filename="frpc-${clientId}.ps1"` });
   }
   if (pathname.startsWith('/client/') && pathname.endsWith('/frpc.toml')) {
     const clientId = pathname.split('/')[2]; const c = getClient(clientId); const token = new URL(req.url, `http://${req.headers.host}`).searchParams.get('token');
