@@ -5,7 +5,7 @@
 ## 功能
 
 - 管理 TCP、UDP、HTTP、HTTPS、STCP、XTCP 隧道。
-- 每个客户端生成独立令牌和一键 Linux / Windows PowerShell 安装命令；命令会下载对应的 frpc.toml、安装 frpc 并注册为系统服务。
+- 每个客户端生成独立令牌和一键 Linux / Windows PowerShell 安装命令；命令会下载对应架构的 frpc 和 frpc.toml，并注册为系统服务/开机任务。
 - 在线编辑 frps 监听端口、Dashboard、认证令牌和日志级别，下载生成的 frps.toml。
 - 面板可以直接调用镜像内置的 frps 进程启停；数据和生成文件持久化到 data/、generated/。
 - JSON 原子写入、HttpOnly 会话 Cookie、审计记录、健康检查和 Docker 更新流程。
@@ -56,7 +56,7 @@
 1. 在“客户端”页新建客户端。
 2. 在“隧道”页添加一个或多个映射。
 3. 点击“一键命令”，选择 Linux 或 Windows PowerShell。
-4. Linux 命令会创建 systemd 服务；Windows 命令需要在“管理员 PowerShell”中执行，会自动校验配置、下载对应架构的 frpc、写入 `%ProgramData%\\frp-panel` 并创建 Windows 开机任务。Windows 原生 `frpc.exe` 不是 Service Control Manager 服务程序，因此使用任务计划程序托管，避免直接 `New-Service` 导致启动失败。
+4. Linux 命令会自动识别架构、下载对应版本的 frpc、校验配置并创建 systemd 服务；Windows 命令需要在“管理员 PowerShell”中执行，会自动校验配置、下载对应架构的 frpc、写入 `%ProgramData%\\frp-panel` 并创建 Windows 开机任务。Windows 原生 `frpc.exe` 不是 Service Control Manager 服务程序，因此使用任务计划程序托管，避免直接 `New-Service` 导致启动失败。
 5. macOS 或不希望使用系统服务的机器，可在“配置”中复制 TOML，下载对应版本的 frpc 后运行 `frpc -c frpc.toml`。
 
 客户端安装脚本使用带令牌的 URL。令牌等同于访问权限，请不要公开分享；删除客户端前先删除该客户端下的隧道。

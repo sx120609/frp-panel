@@ -136,7 +136,60 @@ function renderFrpcConfig(client) {
 function installScript(client) {
   const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`;
   const configUrl = `${base.replace(/\/$/, '')}/client/${client.id}/frpc.toml?token=${encodeURIComponent(client.token)}`;
-  return `#!/usr/bin/env bash\nset -euo pipefail\n# frp-panel client bootstrap for ${client.name}\nINSTALL_DIR="/etc/frp"\nmkdir -p "$INSTALL_DIR"\ncurl -fsSL '${configUrl}' -o "$INSTALL_DIR/frpc.toml"\nif ! command -v frpc >/dev/null 2>&1; then\n  echo "未检测到 frpc，请先从 https://github.com/fatedier/frp/releases 下载并放入 PATH。" >&2\n  exit 2\nfi\ncat >/etc/systemd/system/frpc-${client.id}.service <<'UNIT'\n[Unit]\nDescription=frpc (${client.name})\nAfter=network-online.target\n[Service]\nExecStart=/usr/bin/frpc -c /etc/frp/frpc.toml\nRestart=always\nRestartSec=3\n[Install]\nWantedBy=multi-user.target\nUNIT\nsystemctl daemon-reload\nsystemctl enable --now frpc-${client.id}.service\necho 'frpc 已安装并启动：systemctl status frpc-${client.id}.service'\n`;
+  const releaseBase = `${FRP_DOWNLOAD_BASE_URL}/v${FRP_VERSION}`;
+  const name = client.name.replace(/\n/g, ' ').replace(/\r/g, ' ');
+  return [
+    '#!/usr/bin/env bash',
+    'set -Eeuo pipefail',
+    `# frp-panel Linux client bootstrap for ${name}`,
+    'if [ "$(id -u)" -ne 0 ]; then echo "请用 root 或 sudo 执行此命令。" >&2; exit 1; fi',
+    `INSTALL_DIR="/opt/frp-panel/${client.id}"`,
+    `SERVICE_NAME="frpc-${client.id}.service"`,
+    'CONFIG_PATH="$INSTALL_DIR/frpc.toml"',
+    'FRPC_BIN="$INSTALL_DIR/frpc"',
+    `FRP_VERSION='${FRP_VERSION}'`,
+    `RELEASE_BASE='${releaseBase}'`,
+    'mkdir -p "$INSTALL_DIR"',
+    `curl -fsSL '${configUrl}' -o "$CONFIG_PATH"`,
+    'MACHINE_ARCH="$(uname -m)"',
+    'case "$MACHINE_ARCH" in',
+    '  x86_64|amd64) ARCH="amd64" ;;',
+    '  aarch64|arm64) ARCH="arm64" ;;',
+    '  armv7l|armv6l|arm) ARCH="arm" ;;',
+    '  i386|i686|x86) ARCH="386" ;;',
+    '  riscv64) ARCH="riscv64" ;;',
+    '  *) echo "不支持的 Linux 架构: $MACHINE_ARCH" >&2; exit 2 ;;',
+    'esac',
+    'TMP_DIR="$(mktemp -d)"',
+    'trap \'rm -rf "$TMP_DIR"\' EXIT',
+    'ARCHIVE="$TMP_DIR/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"',
+    'DOWNLOAD_URL="$RELEASE_BASE/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"',
+    'echo "正在下载 frpc $FRP_VERSION ($ARCH)..."',
+    'curl -fL "$DOWNLOAD_URL" -o "$ARCHIVE"',
+    'tar -xzf "$ARCHIVE" -C "$TMP_DIR"',
+    'FRPC_SOURCE="$(find "$TMP_DIR" -type f -name frpc -perm -u+x -print -quit)"',
+    'if [ -z "$FRPC_SOURCE" ]; then echo "下载的 FRP 压缩包中未找到 frpc。" >&2; exit 3; fi',
+    'install -m 0755 "$FRPC_SOURCE" "$FRPC_BIN"',
+    '"$FRPC_BIN" verify -c "$CONFIG_PATH"',
+    'cat > "/etc/systemd/system/$SERVICE_NAME" <<UNIT',
+    '[Unit]',
+    `Description=frpc (${name})`,
+    'After=network-online.target',
+    'Wants=network-online.target',
+    '[Service]',
+    'Type=simple',
+    'ExecStart=/bin/sh -c "$FRPC_BIN -c $CONFIG_PATH"',
+    'Restart=always',
+    'RestartSec=3',
+    '[Install]',
+    'WantedBy=multi-user.target',
+    'UNIT',
+    'systemctl daemon-reload',
+    'systemctl enable --now "$SERVICE_NAME"',
+    'if ! systemctl is-active --quiet "$SERVICE_NAME"; then systemctl --no-pager --full status "$SERVICE_NAME" || true; exit 4; fi',
+    'echo "frpc Linux 客户端已安装并启动：$SERVICE_NAME"',
+    'systemctl --no-pager --full status "$SERVICE_NAME" | sed -n \'1,12p\'',
+  ].join('\n');
 }
 function windowsInstallScript(client) {
   const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`;
