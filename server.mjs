@@ -16,7 +16,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const FRPS_BIN = process.env.FRPS_BIN || 'frps';
 const FRP_VERSION = process.env.FRP_VERSION || '0.61.1';
-const FRP_DOWNLOAD_BASE_URL = (process.env.FRP_DOWNLOAD_BASE_URL || 'https://github.com/fatedier/frp/releases/download').replace(/\/$/, '');
+const FRP_OFFICIAL_DOWNLOAD_BASE_URL = 'https://github.com/fatedier/frp/releases/download';
+const FRP_DOWNLOAD_BASE_URL = (process.env.FRP_DOWNLOAD_BASE_URL || FRP_OFFICIAL_DOWNLOAD_BASE_URL).replace(/\/$/, '');
 const FRP_DEFAULT_MIRROR_BASES = [
   'https://gh-proxy.com/https://github.com/fatedier/frp/releases/download',
   'https://ghproxy.net/https://github.com/fatedier/frp/releases/download',
@@ -74,7 +75,8 @@ function clean(value, fallback = '') { return String(value ?? fallback).trim(); 
 function safeName(value) { return clean(value).replace(/[^\w\-一-龥 ]/g, '').slice(0, 64) || '未命名'; }
 function frpDownloadBases() {
   const custom = clean(process.env.FRP_DOWNLOAD_MIRRORS).split(',').map(x => x.trim()).filter(Boolean);
-  return [...new Set([...custom, ...(process.env.FRP_DOWNLOAD_BASE_URL ? [FRP_DOWNLOAD_BASE_URL] : []), ...FRP_DEFAULT_MIRROR_BASES])];
+  const customBase = process.env.FRP_DOWNLOAD_BASE_URL && FRP_DOWNLOAD_BASE_URL !== FRP_OFFICIAL_DOWNLOAD_BASE_URL ? [FRP_DOWNLOAD_BASE_URL] : [];
+  return [...new Set([...custom, ...customBase, ...FRP_DEFAULT_MIRROR_BASES, ...(customBase.length ? [] : [FRP_DOWNLOAD_BASE_URL])])];
 }
 function shellQuote(value) { return `'${String(value).replace(/'/g, `'\\''`)}'`; }
 function json(res, status, body, headers = {}) {
