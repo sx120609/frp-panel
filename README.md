@@ -12,7 +12,7 @@
 
 ## 一键部署（推荐）
 
-在一台全新 Ubuntu/Debian 公网服务器执行：
+在一台全新 Ubuntu/Debian 公网服务器执行（脚本会自动尝试代码仓库镜像）：
 
     curl -fsSL https://raw.githubusercontent.com/sx120609/frp-panel/main/scripts/install.sh \
       | sudo bash
@@ -25,6 +25,8 @@
     ADMIN_PASSWORD=一段至少16位的强密码
     SESSION_SECRET=openssl rand -hex 32 的输出
     PUBLIC_BASE_URL=https://panel.example.com
+
+如果服务器无法访问 GitHub，可在执行安装脚本前设置 `FRP_PANEL_REPO_MIRRORS`（逗号分隔）或直接设置 `FRP_PANEL_REPO` 为可访问的仓库地址。
 
 打开 http://服务器IP:8080，用 ADMIN_PASSWORD 登录。公网防火墙至少放行面板端口 8080、FRP 服务端口 7000，以及你在面板给 TCP/UDP 隧道分配的远端端口；生产环境建议用 Caddy/Nginx 将 8080 反代为 HTTPS。
 
