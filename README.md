@@ -28,7 +28,7 @@
 
 打开 http://服务器IP:8080，用 ADMIN_PASSWORD 登录。公网防火墙至少放行面板端口 8080、FRP 服务端口 7000，以及你在面板给 TCP/UDP 隧道分配的远端端口；生产环境建议用 Caddy/Nginx 将 8080 反代为 HTTPS。
 
-镜像构建时会从 FRP 官方 Release 下载 frps，默认版本为 0.61.1。升级版本可执行：
+镜像构建时会从 FRP 官方 Release 下载 frps，默认版本为 0.61.1。客户端一键脚本针对中国大陆网络会依次尝试可用的 GitHub 加速源和官方源；也可以在 `FRP_DOWNLOAD_MIRRORS` 中填写逗号分隔的自建/国内镜像基础 URL。升级版本可执行：
 
     docker compose build --build-arg FRP_VERSION=0.61.1
     docker compose up -d

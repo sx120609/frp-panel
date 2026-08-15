@@ -17,6 +17,11 @@ const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toSt
 const FRPS_BIN = process.env.FRPS_BIN || 'frps';
 const FRP_VERSION = process.env.FRP_VERSION || '0.61.1';
 const FRP_DOWNLOAD_BASE_URL = (process.env.FRP_DOWNLOAD_BASE_URL || 'https://github.com/fatedier/frp/releases/download').replace(/\/$/, '');
+const FRP_DEFAULT_MIRROR_BASES = [
+  'https://gh-proxy.com/https://github.com/fatedier/frp/releases/download',
+  'https://ghproxy.net/https://github.com/fatedier/frp/releases/download',
+  'https://github.com/fatedier/frp/releases/download',
+];
 const sessions = new Map();
 let frpsProcess = null;
 
@@ -67,6 +72,11 @@ function id(prefix) { return `${prefix}_${crypto.randomBytes(7).toString('hex')}
 function now() { return new Date().toISOString(); }
 function clean(value, fallback = '') { return String(value ?? fallback).trim(); }
 function safeName(value) { return clean(value).replace(/[^\w\-一-龥 ]/g, '').slice(0, 64) || '未命名'; }
+function frpDownloadBases() {
+  const custom = clean(process.env.FRP_DOWNLOAD_MIRRORS).split(',').map(x => x.trim()).filter(Boolean);
+  return [...new Set([...custom, ...(process.env.FRP_DOWNLOAD_BASE_URL ? [FRP_DOWNLOAD_BASE_URL] : []), ...FRP_DEFAULT_MIRROR_BASES])];
+}
+function shellQuote(value) { return `'${String(value).replace(/'/g, `'\\''`)}'`; }
 function json(res, status, body, headers = {}) {
   const data = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers });
@@ -136,7 +146,7 @@ function renderFrpcConfig(client) {
 function installScript(client) {
   const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`;
   const configUrl = `${base.replace(/\/$/, '')}/client/${client.id}/frpc.toml?token=${encodeURIComponent(client.token)}`;
-  const releaseBase = `${FRP_DOWNLOAD_BASE_URL}/v${FRP_VERSION}`;
+  const downloadBases = frpDownloadBases();
   const name = client.name.replace(/\n/g, ' ').replace(/\r/g, ' ');
   return [
     '#!/usr/bin/env bash',
@@ -148,7 +158,7 @@ function installScript(client) {
     'CONFIG_PATH="$INSTALL_DIR/frpc.toml"',
     'FRPC_BIN="$INSTALL_DIR/frpc"',
     `FRP_VERSION='${FRP_VERSION}'`,
-    `RELEASE_BASE='${releaseBase}'`,
+    `DOWNLOAD_BASES=(${downloadBases.map(shellQuote).join(' ')})`,
     'mkdir -p "$INSTALL_DIR"',
     `curl -fsSL '${configUrl}' -o "$CONFIG_PATH"`,
     'MACHINE_ARCH="$(uname -m)"',
@@ -163,9 +173,13 @@ function installScript(client) {
     'TMP_DIR="$(mktemp -d)"',
     'trap \'rm -rf "$TMP_DIR"\' EXIT',
     'ARCHIVE="$TMP_DIR/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"',
-    'DOWNLOAD_URL="$RELEASE_BASE/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"',
-    'echo "正在下载 frpc $FRP_VERSION ($ARCH)..."',
-    'curl -fL "$DOWNLOAD_URL" -o "$ARCHIVE"',
+    'DOWNLOADED=0',
+    'for DOWNLOAD_BASE in "${DOWNLOAD_BASES[@]}"; do',
+    '  DOWNLOAD_URL="$DOWNLOAD_BASE/v$FRP_VERSION/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"',
+    '  echo "正在下载 frpc $FRP_VERSION ($ARCH): $DOWNLOAD_BASE"',
+    '  if curl --connect-timeout 10 --max-time 180 --retry 1 -fL "$DOWNLOAD_URL" -o "$ARCHIVE"; then DOWNLOADED=1; break; fi',
+    'done',
+    'if [ "$DOWNLOADED" -ne 1 ]; then echo "所有下载源均失败，请设置 FRP_DOWNLOAD_MIRRORS 后重试。" >&2; exit 3; fi',
     'tar -xzf "$ARCHIVE" -C "$TMP_DIR"',
     'FRPC_SOURCE="$(find "$TMP_DIR" -type f -name frpc -perm -u+x -print -quit)"',
     'if [ -z "$FRPC_SOURCE" ]; then echo "下载的 FRP 压缩包中未找到 frpc。" >&2; exit 3; fi',
@@ -194,8 +208,9 @@ function installScript(client) {
 function windowsInstallScript(client) {
   const base = process.env.PUBLIC_BASE_URL || `http://YOUR_PANEL_HOST:${PORT}`;
   const configUrl = `${base.replace(/\/$/, '')}/client/${client.id}/frpc.toml?token=${encodeURIComponent(client.token)}`;
-  const releaseBase = `${FRP_DOWNLOAD_BASE_URL}/v${FRP_VERSION}`;
+  const downloadBases = frpDownloadBases();
   const name = client.name.replace(/'/g, "''");
+  const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
   return [
     '#requires -Version 5.1',
     "$ErrorActionPreference = 'Stop'",
@@ -212,9 +227,15 @@ function windowsInstallScript(client) {
     "  $arch = switch ($machineArch.ToUpperInvariant()) { 'AMD64' { 'amd64'; break } 'ARM64' { 'arm64'; break } 'X86' { '386'; break } default { throw \"Unsupported Windows architecture: $machineArch\" } }",
     `  $version = '${FRP_VERSION}'`,
     '  $zipPath = Join-Path $env:TEMP "frp_${version}_windows_${arch}.zip"',
-    `  $downloadUrl = "${releaseBase}/frp_\${version}_windows_\${arch}.zip"`,
-    '  Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $zipPath',
-    '  $extractDir = Join-Path $env:TEMP "frp-panel-$([Guid]::NewGuid().ToString(\'N\'))"',
+    '  $downloaded = $false',
+    '  $downloadUrls = @(',
+    ...downloadBases.map(baseUrl => `    ${psQuote(baseUrl)} + "/v$version/frp_$version_windows_$arch.zip"`),
+    '  )',
+    '  foreach ($downloadUrl in $downloadUrls) {',
+    '    try { Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $zipPath; if ((Get-Item -LiteralPath $zipPath).Length -gt 1024) { $downloaded = $true; break } } catch { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }',
+    '  }',
+    '  if (-not $downloaded) { throw "所有 FRP 下载源均失败，请检查网络或设置 FRP_DOWNLOAD_MIRRORS。" }',
+    '  $extractDir = Join-Path $env:TEMP ("frp-panel-" + [Guid]::NewGuid().ToString("N"))',
     '  Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force',
     '  $candidate = Get-ChildItem -Path $extractDir -Filter frpc.exe -Recurse | Select-Object -First 1',
     "  if (-not $candidate) { throw 'frpc.exe was not found in the downloaded FRP archive.' }",

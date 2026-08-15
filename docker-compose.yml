@@ -1,6 +1,10 @@
 services:
   frp-panel:
-    build: .
+    build:
+      context: .
+      args:
+        FRP_VERSION: ${FRP_VERSION:-0.61.1}
+        FRP_DOWNLOAD_MIRRORS: ${FRP_DOWNLOAD_MIRRORS:-}
     container_name: frp-panel
     restart: unless-stopped
     ports:
@@ -15,6 +19,9 @@ services:
       DATA_DIR: /app/data
       FRPS_BIN: /usr/local/bin/frps
       FRPS_AUTO_START: "true"
+      FRP_VERSION: ${FRP_VERSION:-0.61.1}
+      FRP_DOWNLOAD_BASE_URL: ${FRP_DOWNLOAD_BASE_URL:-https://github.com/fatedier/frp/releases/download}
+      FRP_DOWNLOAD_MIRRORS: ${FRP_DOWNLOAD_MIRRORS:-}
     volumes:
       - ./data:/app/data
       - ./generated:/app/generated
