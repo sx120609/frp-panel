@@ -147,7 +147,6 @@ function renderFrpcConfig(client) {
     '',
     'transport.dialServerTimeout = 10',
     'transport.dialServerKeepalive = 30',
-    'transport.tcpKeepalive = 30',
     'transport.tcpMuxKeepaliveInterval = 30',
     '',
     'log.to = "console"',
