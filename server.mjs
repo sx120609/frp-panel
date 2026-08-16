@@ -283,17 +283,32 @@ function windowsInstallScript(client) {
   ].join('\n');
 }
 async function startFrps() {
-  if (frpsProcess && !frpsProcess.killed) return { running: true, pid: frpsProcess.pid };
+  if (isFrpsRunning()) return { running: true, pid: frpsProcess.pid };
   const cfg = path.join(GENERATED_DIR, 'frps.toml'); await writeFile(cfg, renderFrpsConfig());
   try { await access(FRPS_BIN); } catch { if (FRPS_BIN.includes(path.sep)) throw new Error(`找不到 frps：${FRPS_BIN}`); }
-  frpsProcess = spawn(FRPS_BIN, ['-c', cfg], { stdio: ['ignore', 'pipe', 'pipe'] });
-  frpsProcess.on('exit', () => { frpsProcess = null; });
-  return { running: true, pid: frpsProcess.pid };
+  const child = spawn(FRPS_BIN, ['-c', cfg], { stdio: ['ignore', 'pipe', 'pipe'] });
+  frpsProcess = child;
+  // Drain both pipes so a busy frps cannot block on a full stdio buffer.
+  child.stdout?.on('data', chunk => console.log(`[frps] ${chunk.toString().trimEnd()}`));
+  child.stderr?.on('data', chunk => console.error(`[frps] ${chunk.toString().trimEnd()}`));
+  child.on('error', error => {
+    console.error('frps process error:', error);
+    if (frpsProcess === child) frpsProcess = null;
+  });
+  // A previous child may exit after a restart. Only that child may clear the
+  // current reference; otherwise the panel can report OFFLINE while new frps
+  // is already listening.
+  child.on('exit', (code, signal) => {
+    console.log(`frps exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
+    if (frpsProcess === child) frpsProcess = null;
+  });
+  return { running: true, pid: child.pid };
 }
-function stopFrps() { if (frpsProcess && !frpsProcess.killed) { frpsProcess.kill('SIGTERM'); frpsProcess = null; } return { running: false }; }
+function isFrpsRunning() { return !!frpsProcess && !frpsProcess.killed && frpsProcess.exitCode === null; }
+function stopFrps() { if (isFrpsRunning()) frpsProcess.kill('SIGTERM'); frpsProcess = null; return { running: false }; }
 
 async function api(req, res, pathname, method) {
-  if (pathname === '/api/health' && method === 'GET') return json(res, 200, { ok: true, time: now(), frps: !!frpsProcess });
+  if (pathname === '/api/health' && method === 'GET') return json(res, 200, { ok: true, time: now(), frps: isFrpsRunning() });
   if (pathname === '/api/login' && method === 'POST') {
     let body; try { body = await readBody(req); } catch { return json(res, 400, { error: '无效请求' }); }
     if (!ADMIN_PASSWORD) return json(res, 503, { error: '服务端未设置 ADMIN_PASSWORD' });
@@ -308,7 +323,7 @@ async function api(req, res, pathname, method) {
   if (pathname === '/api/logout' && method === 'POST') { const c = parseCookies(req).frp_session; if (c) sessions.delete(c); return json(res, 200, { ok: true }, { 'set-cookie': 'frp_session=; Max-Age=0; HttpOnly; SameSite=Strict' }); }
   if (!requireAuth(req, res)) return;
   try {
-    if (pathname === '/api/bootstrap' && method === 'GET') return json(res, 200, { settings: db.settings, clients: db.clients.map(({ token, ...c }) => c), tunnels: db.tunnels, audit: db.audit.slice(0, 20), frps: { running: !!frpsProcess, pid: frpsProcess?.pid || null } });
+    if (pathname === '/api/bootstrap' && method === 'GET') return json(res, 200, { settings: db.settings, clients: db.clients.map(({ token, ...c }) => c), tunnels: db.tunnels, audit: db.audit.slice(0, 20), frps: { running: isFrpsRunning(), pid: frpsProcess?.pid || null } });
     if (pathname === '/api/config/frps' && method === 'GET') return text(res, 200, renderFrpsConfig(), 'text/plain; charset=utf-8', { 'content-disposition': 'attachment; filename="frps.toml"' });
     if (pathname === '/api/settings' && method === 'PATCH') { const b = await readBody(req); for (const k of ['serverAddr','serverPort','bindPort','dashboardPort','dashboardHost','authToken','logLevel','maxPoolCount']) if (b[k] !== undefined) db.settings[k] = ['serverPort','bindPort','dashboardPort','maxPoolCount'].includes(k) ? Number(b[k]) : clean(b[k]); logAudit('更新服务设置'); await saveDb(); return json(res, 200, { settings: db.settings }); }
     if (pathname === '/api/clients' && method === 'POST') { const b = await readBody(req); const client = { id: id('cli'), name: safeName(b.name || '新客户端'), description: clean(b.description), token: crypto.randomBytes(24).toString('hex'), createdAt: now(), lastSeenAt: null }; db.clients.push(client); logAudit('创建客户端', { id: client.id }); await saveDb(); return json(res, 201, client); }
@@ -323,7 +338,7 @@ async function api(req, res, pathname, method) {
     const tunnelMatch = pathname.match(/^\/api\/tunnels\/([^/]+)$/); const tunnelId = tunnelMatch?.[1];
     if (tunnelId && method === 'PATCH') { const t = db.tunnels.find(x => x.id === tunnelId); if (!t) return json(res, 404, { error: '隧道不存在' }); Object.assign(t, validateTunnel({ ...t, ...(await readBody(req)) })); logAudit('更新隧道', { id: tunnelId }); await saveDb(); return json(res, 200, t); }
     if (tunnelId && method === 'DELETE') { const i = db.tunnels.findIndex(t => t.id === tunnelId); if (i < 0) return json(res, 404, { error: '隧道不存在' }); db.tunnels.splice(i, 1); logAudit('删除隧道', { id: tunnelId }); await saveDb(); return json(res, 200, { ok: true }); }
-    if (pathname === '/api/service/status' && method === 'GET') return json(res, 200, { running: !!frpsProcess, pid: frpsProcess?.pid || null, binary: FRPS_BIN });
+    if (pathname === '/api/service/status' && method === 'GET') return json(res, 200, { running: isFrpsRunning(), pid: frpsProcess?.pid || null, binary: FRPS_BIN });
     if (pathname === '/api/service/start' && method === 'POST') { const result = await startFrps(); logAudit('启动 frps'); return json(res, 200, result); }
     if (pathname === '/api/service/stop' && method === 'POST') { const result = stopFrps(); logAudit('停止 frps'); return json(res, 200, result); }
     if (pathname === '/api/service/restart' && method === 'POST') { stopFrps(); const result = await startFrps(); logAudit('重启 frps'); return json(res, 200, result); }
