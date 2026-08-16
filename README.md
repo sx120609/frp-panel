@@ -59,7 +59,7 @@
 2. 在“隧道”页添加一个或多个映射。
 3. 点击“一键命令”，选择 Linux 或 Windows PowerShell。
 4. Linux 命令会自动识别架构、下载对应版本的 frpc、校验配置并创建 systemd 服务；Windows 命令需要在“管理员 PowerShell”中执行，会自动校验配置、下载对应架构的 frpc、写入 `%ProgramData%\\frp-panel` 并创建 Windows 开机任务。Windows 原生 `frpc.exe` 不是 Service Control Manager 服务程序，因此使用任务计划程序托管，避免直接 `New-Service` 导致启动失败。
-5. 客户端配置默认开启断线重连；Linux 服务和 Windows 任务都会在 frpc 异常退出后自动拉起。新增或修改隧道后重新执行同一个一键命令即可拉取最新配置并重启客户端。
+5. 客户端配置默认开启断线重连，并使用 TCP 多路复用 keepalive 维持长连接，避免部分网络环境下应用层心跳误判超时；Linux 服务和 Windows 任务都会在 frpc 异常退出后自动拉起。新增或修改隧道后重新执行同一个一键命令即可拉取最新配置并重启客户端。
 6. macOS 或不希望使用系统服务的机器，可在“配置”中复制 TOML，下载对应版本的 frpc 后运行 `frpc -c frpc.toml`。
 
 客户端安装脚本使用带令牌的 URL。令牌等同于访问权限，请不要公开分享；删除客户端前先删除该客户端下的隧道。
